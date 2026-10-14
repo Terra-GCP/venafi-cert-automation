@@ -1,0 +1,6 @@
+requests>=2.31.0
+cryptography>=42.0.0
+google-cloud-secret-manager>=2.20.0
+google-cloud-pubsub>=2.21.0
+google-auth>=2.29.0
+python-dotenv>=1.0.0

@@ -1,0 +1,43 @@
+substitutions:
+  _REGION: us-central1
+  _REPO: venafi-cert
+  _TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mock-venafi:${_TAG}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mock-venafi:latest
+      - services/mock-venafi
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-sync:${_TAG}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-sync:latest
+      - services/cert-sync
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:${_TAG}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:latest
+      - services/cert-status-app
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mock-venafi:${_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/mock-venafi:latest
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-sync:${_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-sync:latest
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:${_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

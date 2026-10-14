@@ -1,0 +1,17 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+out/
+*.p12
+*.pfx
+*.pem
+*.key
+.DS_Store
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!**/terraform.tfvars.example
+crash.log
