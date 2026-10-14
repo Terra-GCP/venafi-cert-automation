@@ -9,7 +9,7 @@ Core automation (`./scripts/deploy.sh` mode 1) renews certificates that already 
 Lab mode (deploy mode 2) is only for validation when:
 
 - Corporate Venafi is not available yet
-- You need expired certificates on purpose to prove renew works
+- You need a near-expiry certificate on purpose to prove renew works
 - You want a temporary HTTPS status page and load balancer for before/after checks
 
 Lab mode must stay off in client environments that already have certificates and edge infrastructure.
@@ -30,9 +30,9 @@ NONINTERACTIVE=true DEPLOY_MODE=lab PROJECT_ID=your-project ./scripts/deploy.sh
 ## What lab adds on top of core
 
 - Mock Venafi TPP API
-- Seeds 1–2 expired certificates into Secret Manager
-- Runs sync so they renew
-- Deploys `infra/lab-https-lb` (verification HTTPS app + Certificate Manager + load balancer)
+- Seeds 1–2 **near-expiry** certificates into Secret Manager (still valid, ~7 days left by default → secret **v1**)
+- Deploys `infra/lab-https-lb` (verification HTTPS app + Certificate Manager + load balancer) **without** running renew during deploy
+- After deploy, `./scripts/run-sync.sh` (force = **n**) renews to ~90 days → secret **v2**
 
 ## Tear down lab only
 

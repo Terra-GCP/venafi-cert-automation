@@ -23,13 +23,13 @@ variable "cert_name" {
 
 variable "cert_common_name" {
   type        = string
-  description = "Common Name used for mock issuance and expired seed material"
+  description = "Common Name used for mock issuance and lab near-expiry seed material"
   default     = "app.example.local"
 }
 
 variable "secondary_cert_name" {
   type        = string
-  description = "Optional second logical cert name for lab expired seeding only (empty to skip)"
+  description = "Optional second logical cert name for lab near-expiry seeding only (empty to skip)"
   default     = ""
 }
 
@@ -125,8 +125,8 @@ variable "force_renew" {
 
 variable "mock_initial_days_left" {
   type        = number
-  description = "Days of validity for mock certs before Renew (use negative for already expired)"
-  default     = -7
+  description = "Days of validity for mock certs before Renew (positive near-expiry; negative = already expired)"
+  default     = 7
 }
 
 variable "mock_renew_validity_days" {
@@ -163,19 +163,19 @@ variable "seed_mock_secret_versions" {
 
 variable "enable_lab_stack" {
   type        = bool
-  description = "Enable optional lab verification resources (expired seed helpers, lab HTTPS LB Cloud Build trigger). Keep false for client/production."
+  description = "Enable optional lab verification resources (near-expiry seed helpers, lab HTTPS LB Cloud Build trigger). Keep false for client/production."
   default     = false
 }
 
 variable "seed_expired_certificates" {
   type        = bool
-  description = "LAB ONLY. Write expired cert/key material into Secret Manager for renew demos. Must stay false for client environments that already have certificates."
+  description = "LAB ONLY. Write near-expiry cert/key material into Secret Manager for renew demos. Must stay false for client environments that already have certificates."
   default     = false
 }
 
-variable "seed_expired_days_ago" {
+variable "seed_days_until_expiry" {
   type        = number
-  description = "LAB ONLY. How many days in the past the seeded certificates expired"
+  description = "LAB ONLY. Days remaining on seeded certificates (keep <= renew_days_before so the next sync renews without force)"
   default     = 7
 }
 

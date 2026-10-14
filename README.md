@@ -11,8 +11,8 @@ Project ID, region, names, Venafi endpoints, and install targets are all configu
 | | **Core automation** | **Lab verification kit** |
 | --- | --- | --- |
 | Who uses it | Any client / project / environment that already has Venafi certs and edge infra | Teams validating the solution without corporate Venafi |
-| What it does | Renew due/expired certs from Venafi, store in Secret Manager, install via CM API or a client-owned Terraform trigger | Same core, plus mock Venafi, **temporary expired seed certs**, and a temporary HTTPS status app / LB |
-| Creates expired certs? | **No** | **Yes** (lab only, for renew demos) |
+| What it does | Renew due/expired certs from Venafi, store in Secret Manager, install via CM API or a client-owned Terraform trigger | Same core, plus mock Venafi, **temporary near-expiry seed certs**, and a temporary HTTPS status app / LB |
+| Creates near-expiry seed certs? | **No** | **Yes** (lab only, for renew demos) |
 | Creates load balancer / app? | **No** (uses what the client already has) | **Yes** (`infra/lab-https-lb`) |
 | Deploy | `./scripts/deploy.sh` → mode **1** | `./scripts/deploy.sh` → mode **2** |
 
@@ -122,7 +122,7 @@ Core does **not** seed expired certificates and does **not** create a load balan
 # Deploy mode -> 2
 ```
 
-Lab seeds 1–2 expired certs, renews them via mock Venafi, then creates a temporary HTTPS status app so you can compare serial / fingerprint / expiry before and after.
+Lab seeds 1–2 near-expiry certs (~7 days left), puts that baseline on a temporary HTTPS status app, then leaves renew for the next sync / scheduler run so you can compare serial / fingerprint / expiry before and after.
 
 ---
 
@@ -139,9 +139,11 @@ Lab seeds 1–2 expired certs, renews them via mock Venafi, then creates a tempo
 ## How to see a renew (lab)
 
 1. Open the lab URL from deploy (`https://LB_IP/` or `/api/cert`)
-2. Note Serial, SHA-256, Not after, Secret version
-3. `./scripts/run-sync.sh` with force renew = `y`
-4. Refresh: those fields should change
+2. Baseline after deploy: secret **v1**, ~7 days left (inside the 30-day renew window)
+3. `./scripts/run-sync.sh` with force renew = `n` (scheduler would do the same)
+4. Refresh: secret **v2**, ~90 days left; Serial / SHA-256 / Not after should change
+
+Force renew (`y`) is only needed when the current cert is still outside the renew window.
 
 ---
 
@@ -149,10 +151,10 @@ Lab seeds 1–2 expired certs, renews them via mock Venafi, then creates a tempo
 
 | # | Scenario | Mode | Expected |
 | --- | --- | --- | --- |
-| 1 | Client core deploy | 1 | Job + secrets + scheduler; no expired seeds; no lab LB |
-| 2 | Lab first run | 2 | Expired seeds → sync renews → lab URL shows valid cert |
+| 1 | Client core deploy | 1 | Job + secrets + scheduler; no lab seeds; no lab LB |
+| 2 | Lab first run | 2 | Near-expiry seed on lab URL (~7d, v1); sync renews to ~90d (v2) |
 | 3 | Not due | either | `SKIPPED` when days left above threshold |
-| 4 | Force renew | either | New serial / fingerprint / secret version |
+| 4 | Force renew | either | New serial / fingerprint / secret version when cert is not yet due |
 | 5 | Real Venafi | 1 | Same job; credentials from Secret Manager only |
 | 6 | Tear down | destroy | Lab only or full cleanup |
 
@@ -164,7 +166,8 @@ Lab seeds 1–2 expired certs, renews them via mock Venafi, then creates a tempo
 | --- | --- | --- |
 | `DEPLOY_MODE` / deploy prompt | `core` | `core` or `lab` |
 | `enable_lab_stack` | `false` | Lab trigger / lab helpers |
-| `seed_expired_certificates` | `false` | Must stay false for clients |
+| `seed_expired_certificates` | `false` | Lab near-expiry seed toggle; must stay false for clients |
+| `seed_days_until_expiry` | `7` | Lab only; keep ≤ `renew_days_before` (default 30) |
 | `enable_mock` | `false` for clients | Mock TPP on Cloud Run |
 | `cert_install_method` | `cm_api` | `cm_api` \| `tf_cloudbuild` \| `none` |
 | `cert_map_name` / `cert_map_entry_name` | client values | Existing CM map (core + cm_api) |
@@ -177,7 +180,7 @@ See `infra/foundation/terraform.tfvars.example`.
 ## Security notes
 
 - Venafi passwords go only to Secret Manager (never committed tfvars)
-- Lab expired seeding is intentional test data; keep it disabled in client projects
+- Lab near-expiry seeding is intentional test data; keep it disabled in client projects
 - Prefer private egress from Cloud Run to corporate TPP in production
 
 ---

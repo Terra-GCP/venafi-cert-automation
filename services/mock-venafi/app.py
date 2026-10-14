@@ -18,7 +18,7 @@ MOCK_PASSWORD = os.getenv("MOCK_VENAFI_PASSWORD", "mock-password")
 DEFAULT_P12_PASSWORD = os.getenv("MOCK_P12_PASSWORD", "changeit")
 CERT_CN = os.getenv("MOCK_CERT_CN", "app.example.local")
 DEFAULT_DN = os.getenv("MOCK_CERT_DN", r"\VED\Policy\Apps\app.example.local")
-INITIAL_DAYS_LEFT = int(os.getenv("MOCK_INITIAL_DAYS_LEFT", "-7"))
+INITIAL_DAYS_LEFT = int(os.getenv("MOCK_INITIAL_DAYS_LEFT", "7"))
 RENEW_VALIDITY_DAYS = int(os.getenv("MOCK_RENEW_VALIDITY_DAYS", "90"))
 TOKEN = "mock-access-token"
 

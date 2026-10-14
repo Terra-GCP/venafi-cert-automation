@@ -45,12 +45,30 @@ gcloud config set project "${PROJECT_ID}" >/dev/null
 destroy_lab_prefix() {
   local p="$1"
   echo "Deleting lab / verification stack (prefix=${p})..."
+  # Prefer real secret IDs from foundation tfvars / defaults so destroy refresh succeeds.
+  local secret_cert="app-tls-certificate"
+  local secret_key="app-tls-private-key"
+  if [[ -f infra/foundation/terraform.tfvars ]]; then
+    local cert_name
+    cert_name="$(awk -F'"' '/^cert_name[[:space:]]*=/{print $2; exit}' infra/foundation/terraform.tfvars || true)"
+    if [[ -n "${cert_name}" ]]; then
+      secret_cert="${cert_name}-certificate"
+      secret_key="${cert_name}-private-key"
+    fi
+  fi
+  if [[ -f infra/lab-https-lb/terraform.tfvars ]]; then
+    local existing_cert existing_key
+    existing_cert="$(awk -F'"' '/^secret_cert_name[[:space:]]*=/{print $2; exit}' infra/lab-https-lb/terraform.tfvars || true)"
+    existing_key="$(awk -F'"' '/^secret_key_name[[:space:]]*=/{print $2; exit}' infra/lab-https-lb/terraform.tfvars || true)"
+    [[ -n "${existing_cert}" && "${existing_cert}" != "placeholder-certificate" ]] && secret_cert="${existing_cert}"
+    [[ -n "${existing_key}" && "${existing_key}" != "placeholder-private-key" ]] && secret_key="${existing_key}"
+  fi
   cat > infra/lab-https-lb/terraform.tfvars <<EOF
 project_id         = "${PROJECT_ID}"
 region             = "${REGION}"
 name_prefix        = "${p}"
-secret_cert_name   = "placeholder-certificate"
-secret_key_name    = "placeholder-private-key"
+secret_cert_name   = "${secret_cert}"
+secret_key_name    = "${secret_key}"
 status_app_image   = "placeholder"
 EOF
   if gsutil ls "gs://${TF_BUCKET}/lab-https-lb/" >/dev/null 2>&1 || gsutil ls "gs://${TF_BUCKET}/sample-https-lb/" >/dev/null 2>&1; then
@@ -61,7 +79,9 @@ EOF
     terraform init -input=false -reconfigure \
       -backend-config="bucket=${TF_BUCKET}" \
       -backend-config="prefix=sample-https-lb" >/dev/null || true
-    terraform destroy -input=false -auto-approve || true
+    # -refresh=false avoids failing when secret data sources cannot be re-read mid-destroy.
+    terraform destroy -input=false -auto-approve -refresh=false || \
+      terraform destroy -input=false -auto-approve || true
     cd "$ROOT"
     gsutil -m rm -r "gs://${TF_BUCKET}/lab-https-lb" >/dev/null 2>&1 || true
     gsutil -m rm -r "gs://${TF_BUCKET}/sample-https-lb" >/dev/null 2>&1 || true

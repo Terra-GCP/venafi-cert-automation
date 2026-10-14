@@ -30,6 +30,7 @@ cert_map_entry_name   = "YOUR_EXISTING_MAP_ENTRY"
 # ---------------------------------------------------------------------------
 # enable_lab_stack              = true
 # seed_expired_certificates     = true
+# seed_days_until_expiry        = 7
 # secondary_cert_name           = "edge-tls"
 # secondary_cert_common_name    = "edge.example.local"
 # enable_mock                   = true

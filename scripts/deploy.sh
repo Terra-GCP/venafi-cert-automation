@@ -36,7 +36,7 @@ if [[ "${NONINTERACTIVE}" == "true" ]]; then
 else
   echo "What do you want to deploy?"
   echo "  1 = Core automation only (client / production; renews existing Venafi certificates)"
-  echo "  2 = Core + lab verification kit (mock-friendly; seeds expired certs + HTTPS status app for testing)"
+  echo "  2 = Core + lab verification kit (mock-friendly; seeds near-expiry certs + HTTPS status app for testing)"
   mode_choice="$(ask "Deploy mode" "1")"
   case "${mode_choice}" in
     2) DEPLOY_MODE="lab" ;;
@@ -144,6 +144,7 @@ enable_mock                   = ${USE_MOCK}
 seed_mock_secret_versions     = ${seed_mock}
 enable_lab_stack              = ${ENABLE_LAB}
 seed_expired_certificates     = ${SEED_EXPIRED}
+seed_days_until_expiry        = ${SEED_DAYS_UNTIL_EXPIRY:-7}
 cert_install_method           = "${CERT_INSTALL_METHOD}"
 lab_name_prefix               = "${PREFIX}-lab"
 external_tf_cloudbuild_trigger = "${EXTERNAL_TF_TRIGGER}"
@@ -207,10 +208,11 @@ if [[ "${USE_MOCK}" != "true" ]]; then
 fi
 
 if [[ "${ENABLE_LAB}" == "true" ]]; then
-  echo "Lab mode: uploading lab Terraform package and running renew sync..."
+  # Do not renew during deploy: seed leaves secret v1 near-expiry so the lab URL
+  # shows a due cert; the next sync / scheduler run produces v2 (~90 days).
+  echo "Lab mode: uploading lab Terraform package (keeping near-expiry seed; no renew yet)..."
   PROJECT_ID="${PROJECT_ID}" PREFIX="${PREFIX}" TF_BUCKET="${TF_BUCKET}" \
     "${ROOT}/scripts/internal/upload-tf-source.sh"
-  gcloud run jobs execute "${JOB_NAME}" --project="${PROJECT_ID}" --region="${REGION}" --wait
   echo "Creating lab HTTPS verification stack (local Terraform)..."
   cat > infra/lab-https-lb/terraform.tfvars <<EOF
 project_id         = "${PROJECT_ID}"
@@ -235,7 +237,7 @@ EOF
   cd "$ROOT"
 else
   LB_IP=""
-  echo "Core mode: no expired seeds and no lab load balancer were created."
+  echo "Core mode: no lab seeds and no lab load balancer were created."
   echo "Point CERT_MAP_* or EXTERNAL_TF_TRIGGER at your existing environment, then run ./scripts/run-sync.sh"
 fi
 
@@ -251,6 +253,11 @@ echo "  Sync job:       ${JOB_NAME}"
 if [[ -n "${LB_IP}" ]]; then
   echo "  Lab URL:        https://${LB_IP}/"
   echo "  Cert JSON:      https://${LB_IP}/api/cert"
+  echo ""
+  echo "Lab baseline: secret v1 should show ~7 days left (near expiry)."
+  echo "Then run sync without force to renew to ~90 days (secret v2):"
+  echo "  ./scripts/run-sync.sh"
+else
+  echo "Run sync: ./scripts/run-sync.sh"
 fi
-echo "Run sync: ./scripts/run-sync.sh"
 echo ""

@@ -18,15 +18,17 @@ resource "google_secret_manager_secret" "secondary_private_key" {
 
 resource "null_resource" "seed_expired_certificates" {
   # Lab / validation only. Never enable for client environments with existing certificates.
+  # Seeds a still-valid near-expiry cert (secret v1) so deploy can put it on the lab LB;
+  # the next sync / scheduler run renews it without FORCE_RENEW.
   count = var.enable_lab_stack && var.seed_expired_certificates ? 1 : 0
 
   triggers = {
-    project_id   = var.project_id
-    primary      = var.cert_name
-    secondary    = var.secondary_cert_name
-    cn           = var.cert_common_name
-    secondary_cn = var.secondary_cert_common_name
-    days_ago     = tostring(var.seed_expired_days_ago)
+    project_id         = var.project_id
+    primary            = var.cert_name
+    secondary          = var.secondary_cert_name
+    cn                 = var.cert_common_name
+    secondary_cn       = var.secondary_cert_common_name
+    days_until_expiry  = tostring(var.seed_days_until_expiry)
   }
 
   depends_on = [
@@ -50,7 +52,7 @@ resource "null_resource" "seed_expired_certificates" {
       "$${VENV}/bin/python" "${path.module}/../../scripts/internal/seed_expired_certs.py" \
         --project-id "${var.project_id}" \
         --specs "$${SPECS}" \
-        --days-expired "${var.seed_expired_days_ago}"
+        --days-until-expiry "${var.seed_days_until_expiry}"
     EOT
   }
 }

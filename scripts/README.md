@@ -14,7 +14,7 @@
 | | Core (mode 1) | Lab (mode 2) |
 | --- | --- | --- |
 | Purpose | Renew existing Venafi certificates in a client project | Prove the flow without corporate Venafi |
-| Expired seed certs | No | Yes (1–2 expired seeds for renew demo) |
+| Near-expiry seed certs | No | Yes (1–2 near-expiry seeds; renew via sync, not during deploy) |
 | HTTPS status app / LB | No (use client's existing edge) | Yes (`infra/lab-https-lb`) |
 | Mock Venafi | Optional | Yes |
 
