@@ -1,0 +1,37 @@
+project_id  = "YOUR_GCP_PROJECT_ID"
+region      = "us-central1"
+name_prefix = "venafi-cert"
+
+enable_mock               = false
+# When enable_mock=true, write mock username/password/p12 into {name_prefix}-venafi-* secrets.
+# Keep false for real Venafi and populate those secrets yourself.
+seed_mock_secret_versions = false
+
+venafi_platform = "tpp"
+venafi_base_url = "https://venafi.example.com"
+
+# Job scans Secret Manager for *-certificate + paired *-private-key.
+renew_days_before  = 30
+secret_cert_suffix = "-certificate"
+secret_key_suffix  = "-private-key"
+# Optional annotation on cert secret: venafi-dn = \\VED\\Policy\\Apps\\example.com
+# venafi_dn_label_key = "venafi-dn"
+# venafi_dn_prefix    = "\\\\VED\\\\Policy\\\\Apps"
+
+# Cloud Scheduler (minute hour day-of-month month day-of-week)
+scheduler_cron     = "0 6 * * *"
+scheduler_timezone = "UTC"
+# scheduler_cron     = "0 2 * * 1-5"
+# scheduler_timezone = "America/New_York"
+# scheduler_cron     = "0 */6 * * *"
+
+enable_renew_alerts   = true
+enable_failure_alerts = true
+alert_emails          = ["you@example.com"]
+# notification_channel_ids = ["projects/YOUR_GCP_PROJECT_ID/notificationChannels/123456"]
+
+# Optional; default false (no Pub/Sub topic)
+# enable_pubsub_events = true
+
+# Keys present here are reused by ./scripts/deploy.sh without prompting.
+# Env vars (PROJECT_ID, SCHEDULER_CRON, ...) override tfvars when set.

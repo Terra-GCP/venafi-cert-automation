@@ -82,7 +82,7 @@ class VenafiClient:
 
         raise SystemExit(f"Venafi login failed. Last error: {last_error}")
 
-    def download_pkcs12(self, dest: Path) -> Path:
+    def download_pkcs12(self, dest: Path, certificate_dn: str) -> Path:
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         if self.settings.platform == "cloud":
@@ -94,7 +94,7 @@ class VenafiClient:
 
         url = f"{self.settings.base_url}/vedsdk/Certificates/Retrieve"
         params = {
-            "CertificateDN": self.settings.certificate_dn,
+            "CertificateDN": certificate_dn,
             "Format": "PKCS #12",
             "IncludePrivateKey": "true",
             "IncludeChain": "true",
@@ -102,7 +102,7 @@ class VenafiClient:
         }
         response = self.session.get(url, params=params, timeout=120)
         if response.status_code >= 400:
-            raise SystemExit(
+            raise RuntimeError(
                 "Certificate download failed. "
                 f"HTTP {response.status_code}: {response.text[:400]}"
             )
@@ -110,7 +110,7 @@ class VenafiClient:
         dest.write_bytes(response.content)
         return dest
 
-    def renew_certificate(self) -> dict:
+    def renew_certificate(self, certificate_dn: str) -> dict:
         if self.settings.platform == "cloud":
             raise SystemExit(
                 "Venafi as a Service renew is not configured in this release. "
@@ -119,12 +119,12 @@ class VenafiClient:
 
         url = f"{self.settings.base_url}/vedsdk/Certificates/Renew"
         payload = {
-            "CertificateDN": self.settings.certificate_dn,
+            "CertificateDN": certificate_dn,
             "Password": self.settings.p12_password,
         }
         response = self.session.post(url, json=payload, timeout=120)
         if response.status_code >= 400:
-            raise SystemExit(
+            raise RuntimeError(
                 "Certificate renew failed. "
                 f"HTTP {response.status_code}: {response.text[:400]}"
             )
@@ -133,25 +133,49 @@ class VenafiClient:
         except ValueError:
             return {"Success": True}
 
-    def fetch_certificate_meta(self) -> dict:
-        if self.settings.platform == "cloud":
-            return {"dn": self.settings.certificate_dn}
+    def resolve_certificate_dn(
+        self,
+        *,
+        common_name: str,
+        preferred_dn: str | None = None,
+        dn_prefix: str = r"\VED\Policy\Apps",
+    ) -> str:
+        """Resolve Venafi Certificate DN from an optional label, then CN lookup, then prefix+CN."""
+        if preferred_dn:
+            return preferred_dn
 
+        if self.settings.platform == "cloud":
+            raise RuntimeError(
+                f"Cannot resolve Venafi DN for CN={common_name} on Venafi Cloud. "
+                f"Set Secret Manager label '{self.settings.venafi_dn_label_key}' on the cert secret."
+            )
+
+        looked_up = self.find_certificate_dn_by_cn(common_name)
+        if looked_up:
+            return looked_up
+
+        prefix = dn_prefix.rstrip("\\/")
+        return f"{prefix}\\{common_name}"
+
+    def find_certificate_dn_by_cn(self, common_name: str) -> str | None:
+        """Best-effort TPP/mock lookup of Certificate DN by Common Name."""
         url = f"{self.settings.base_url}/vedsdk/Certificates"
-        params = {"CN": self.settings.certificate_dn.split("\\")[-1]}
+        response = self.session.get(
+            url,
+            params={"CN": common_name, "Limit": 25},
+            timeout=60,
+        )
+        if response.status_code >= 400:
+            return None
         try:
-            response = self.session.get(url, params=params, timeout=60)
-            if response.status_code >= 400:
-                return {"dn": self.settings.certificate_dn}
             data = response.json()
-            certs = data.get("Certificates") or data.get("certificates") or []
-            if not certs:
-                return {"dn": self.settings.certificate_dn}
-            first = certs[0]
-            return {
-                "dn": first.get("DN") or self.settings.certificate_dn,
-                "name": first.get("Name") or first.get("CN"),
-                "valid_to": first.get("ValidTo") or first.get("X509", {}).get("ValidTo"),
-            }
-        except requests.RequestException:
-            return {"dn": self.settings.certificate_dn}
+        except ValueError:
+            return None
+
+        certs = data.get("Certificates") or data.get("certificates") or []
+        for cert in certs:
+            cn = str(cert.get("CN") or cert.get("Name") or "").strip()
+            dn = str(cert.get("DN") or cert.get("CertificateDN") or "").strip()
+            if dn and (not cn or cn.lower() == common_name.lower()):
+                return dn
+        return None

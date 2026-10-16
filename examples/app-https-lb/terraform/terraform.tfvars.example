@@ -1,0 +1,7 @@
+project_id         = "YOUR_GCP_PROJECT_ID"
+region             = "us-central1"
+name_prefix        = "venafi-cert-app"
+secret_cert_name   = "app-tls-certificate"
+secret_key_name    = "app-tls-private-key"
+status_app_image   = "REGION-docker.pkg.dev/YOUR_GCP_PROJECT_ID/venafi-cert-app/cert-status-app:latest"
+tf_state_bucket    = "YOUR_GCP_PROJECT_ID-venafi-cert-app-tf"

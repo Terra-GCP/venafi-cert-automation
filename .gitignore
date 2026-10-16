@@ -13,5 +13,7 @@ out/
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.auto.tfvars.json
 !**/terraform.tfvars.example
+!**/*.tfvars.example
 crash.log

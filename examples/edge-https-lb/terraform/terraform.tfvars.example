@@ -1,0 +1,7 @@
+project_id         = "YOUR_GCP_PROJECT_ID"
+region             = "us-central1"
+name_prefix        = "venafi-cert-edge"
+secret_cert_name   = "edge-tls-certificate"
+secret_key_name    = "edge-tls-private-key"
+status_app_image   = "REGION-docker.pkg.dev/YOUR_GCP_PROJECT_ID/venafi-cert-edge/edge-status-app:latest"
+tf_state_bucket    = "YOUR_GCP_PROJECT_ID-venafi-cert-edge-tf"

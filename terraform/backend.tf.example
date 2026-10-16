@@ -1,0 +1,9 @@
+# Optional remote state. Scripts use local state by default.
+# Copy to backend.tf, then: terraform init -reconfigure
+#
+# terraform {
+#   backend "gcs" {
+#     bucket = "YOUR_TF_STATE_BUCKET"
+#     prefix = "venafi-cert-automation"
+#   }
+# }

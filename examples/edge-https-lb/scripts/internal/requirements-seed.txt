@@ -1,0 +1,2 @@
+cryptography>=42.0.0
+google-cloud-secret-manager>=2.20.0

@@ -1,194 +1,219 @@
 # Venafi Certificate Automation for Google Cloud
 
-Automates renewal of TLS certificates from Venafi Trust Protection Platform (TPP) and installs the renewed material into Google Cloud (Secret Manager, then Certificate Manager and/or client Terraform).
+Scans Secret Manager in a GCP project for TLS certificates nearing expiry, renews them via Venafi Trust Protection Platform (TPP), and writes new versions back to those secrets.
 
-Project ID, region, names, Venafi endpoints, and install targets are all configurable. The same sync job works with a **mock Venafi** API (lab / dry-run) or a **real Venafi TPP** endpoint (client / production). Switching modes does not require application code changes.
+No certificate inventory at deploy time. The sync job discovers `*-certificate` and paired `*-private-key` secrets already in the project.
 
----
+Optional demos: `examples/`.
 
-## Core vs lab (important)
-
-| | **Core automation** | **Lab verification kit** |
-| --- | --- | --- |
-| Who uses it | Any client / project / environment that already has Venafi certs and edge infra | Teams validating the solution without corporate Venafi |
-| What it does | Renew due/expired certs from Venafi, store in Secret Manager, install via CM API or a client-owned Terraform trigger | Same core, plus mock Venafi, **temporary near-expiry seed certs**, and a temporary HTTPS status app / LB |
-| Creates near-expiry seed certs? | **No** | **Yes** (lab only, for renew demos) |
-| Creates load balancer / app? | **No** (uses what the client already has) | **Yes** (`infra/lab-https-lb`) |
-| Deploy | `./scripts/deploy.sh` → mode **1** | `./scripts/deploy.sh` → mode **2** |
-
-Client environments should use **core only**. Lab mode is optional and must not be enabled where certificates and HTTPS infrastructure already exist.
-
-Details: [scripts/lab/README.md](scripts/lab/README.md)
-
----
-
-## Problem this solves
-
-Teams that keep private certificates in Venafi often still renew and install them on Google Cloud by hand: check expiry, renew/export from Venafi, split cert/key, upload to Secret Manager, update Certificate Manager or Terraform. That process is easy to miss and hard to audit.
-
-This package closes the loop for **existing** certificates:
-
-1. Scheduler (or operator) runs the sync job
-2. Job reads current Secret Manager cert; if due/expired (or force), renews from Venafi
-3. Downloads PKCS#12, validates key match, writes new Secret Manager versions
-4. Installs with exactly one configured method: Certificate Manager API, client Terraform via Cloud Build, or secrets-only
-
----
-
-## Why we used a mock Venafi API
-
-Corporate Venafi access is not always available up front. Getting URL reachability from Cloud Run, accounts, certificate policy DNs, and export passwords usually needs security / PKI approvals and is not a straight path for a first build.
-
-The **mock Venafi TPP API** (lab mode) simulates authorize / renew / retrieve so the full Google Cloud path can be proven end to end. When corporate Venafi is ready, point the same job at the real base URL and store real credentials in Secret Manager. No application rewrite is required.
-
----
-
-## Repository layout
+## Layout
 
 ```
 venafi-cert-automation/
-├── README.md
-├── cloudbuild/
-│   ├── build-images.yaml       # cert-sync, mock-venafi, cert-status-app images
-│   └── lab-https-lb.yaml       # optional lab Cloud Build submit
-├── infra/
-│   ├── foundation/             # CORE: job, scheduler, secrets, mock (optional), IAM
-│   └── lab-https-lb/           # LAB ONLY: status app + HTTPS LB + Certificate Manager
-├── services/
-│   ├── cert-sync/              # Sync job: Venafi -> Secret Manager -> install
-│   ├── mock-venafi/            # Mock TPP API (lab / dry-run)
-│   └── cert-status-app/        # Lab status page (serial, fingerprint, expiry)
-└── scripts/
-    ├── deploy.sh               # Mode 1 = core, mode 2 = core + lab
-    ├── run-sync.sh
-    ├── set-venafi-secrets.sh
-    ├── destroy.sh
-    ├── lab/README.md           # Lab-only notes
-    └── internal/               # Helpers (do not run directly)
+├── terraform/           # Job, scheduler, Venafi creds, alerts
+├── services/cert-sync   # Discover, renew, write Secret Manager
+├── services/mock-venafi # Optional mock TPP (enable_mock=true)
+├── scripts/             # Optional deploy helpers
+└── examples/            # Optional HTTPS LB demos
 ```
 
----
-
-## Architecture (core)
+## Architecture
 
 ```mermaid
 flowchart LR
-  Sched[Cloud Scheduler] --> Job[cert-sync job]
-  Job -->|real| TPP[Venafi TPP]
-  Job -->|lab mock| Mock[Mock Venafi]
-  Job --> SM[Secret Manager]
-  Job -->|cm_api| CM[Client Certificate Manager map]
-  Job -->|tf_cloudbuild| CB[Client Cloud Build trigger]
-  CB --> ClientTF[Client Terraform / LB]
-  CM --> ClientTF
-  Job --> PS[Pub/Sub events]
+  subgraph core [Core automation]
+    SCH[Cloud Scheduler]
+    JOB[Cloud Run job<br/>cert-sync]
+    SM[(Secret Manager<br/>app TLS PEMs)]
+    CRED[(Venafi creds<br/>secrets)]
+    VEN[Venafi TPP<br/>or mock]
+    MON[Monitoring alerts]
+  end
+
+  SCH -->|cron| JOB
+  CRED --> JOB
+  JOB -->|list / read / write| SM
+  JOB -->|renew + download| VEN
+  JOB -->|VENAFI_CERT_EVENT| MON
 ```
 
----
+```mermaid
+flowchart TD
+  A[Scheduler or run-sync.sh] --> B[List SM secrets<br/>*-certificate + *-private-key]
+  B --> C{Days left less than<br/>or equal renew_days_before?}
+  C -->|No| D[Skip]
+  C -->|Yes| E[Resolve Venafi DN]
+  E --> F[Renew + download PKCS12]
+  F --> G[Write new SM versions]
+  G --> H[Log renewed + optional email]
+```
 
-## Quick start
+## What gets deployed
 
-### Client / production (core only)
+### Core (`./scripts/deploy.sh` / `terraform/`)
+
+| GCP resource | Default name (prefix `venafi-cert`) | Always? |
+| --- | --- | --- |
+| Enabled APIs | Run, Scheduler, Secret Manager, Cloud Build, Artifact Registry, IAM, Logging, Monitoring (+ Pub/Sub API only if events on) | Yes |
+| Artifact Registry | `venafi-cert` | Yes |
+| Container image | `cert-sync:latest` | Yes |
+| Cloud Run **job** | `venafi-cert-sync` | Yes |
+| Cloud Scheduler | `venafi-cert-daily` | Yes |
+| Service accounts | `venafi-cert-sync`, `venafi-cert-sched` | Yes |
+| Secret Manager | `venafi-cert-venafi-username`, `-password`, `-p12-password` | Yes |
+| IAM | Sync SA = Secret Manager admin; scheduler can run job; Cloud Build can push images | Yes |
+| Monitoring email channel | From `alert_emails` | If emails set |
+| Alert policy (renewed) | `venafi-cert certificate renewed` | If alerts + channels |
+| Alert policy (failed) | `venafi-cert certificate sync failed` | If alerts + channels |
+| Mock Cloud Run service | `venafi-cert-mock` + mock SA + public invoker | Only `enable_mock=true` |
+| Mock secret versions | Seeds mock username/password/p12 | Only `enable_mock` + `seed_mock_secret_versions` |
+| Pub/Sub topic | `venafi-cert-events` | Only `enable_pubsub_events=true` (default **off**) |
+
+Core does **not** create application TLS secrets, load balancers, or Certificate Manager certificates.
+
+### Example app HTTPS LB (`examples/app-https-lb/scripts/deploy.sh`)
+
+| GCP resource | Default name | Notes |
+| --- | --- | --- |
+| Secret Manager TLS pair | `app-tls-certificate`, `app-tls-private-key` | Near-expiry seed (outside Terraform) |
+| GCS state bucket | `{project}-venafi-cert-app-tf` | TF state + CB source package |
+| Artifact Registry | `venafi-cert-app` | Status app image |
+| Cloud Run service | `venafi-cert-app-app` | Status page (cert baked at TF apply) |
+| Service account | `venafi-cert-app-app` | Status app identity |
+| Certificate Manager | cert + map + entry | Loaded from SM at apply time |
+| HTTPS load balancer | Global IP, URL map, HTTPS proxy, forwarding rule, NEG, backend | Public HTTPS |
+| Pub/Sub topic | `venafi-cert-app-tf-apply` | Event source shape for CB trigger |
+| Cloud Build trigger | `venafi-cert-app-https-lb` | Manual **Run** to re-apply LB cert |
+
+### Example edge HTTPS LB (`examples/edge-https-lb/scripts/deploy.sh`)
+
+Same pattern as app, with prefix `venafi-cert-edge` and secrets `edge-tls-certificate` / `edge-tls-private-key`.
+
+### Renew demo flow (examples)
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Page as Status page / LB
+  participant SM as Secret Manager
+  participant Sync as Core sync job
+  participant CB as Cloud Build trigger
+
+  User->>Page: Open LB URL (near-expiry shown)
+  User->>Sync: run-sync.sh
+  Sync->>SM: Renew writes new versions
+  Note over Page: Page unchanged (baked at last TF apply)
+  User->>CB: Console Run on https-lb trigger
+  CB->>Page: Re-apply cert from SM
+  User->>Page: Refresh (new expiry / serial)
+```
+
+## Deploy
+
+### Scripts
+
+Values already set in env or `terraform/terraform.tfvars` are not prompted.
 
 ```bash
+# Prefer editing terraform/terraform.tfvars first
 ./scripts/deploy.sh
-# Deploy mode -> 1
-# Use mock Venafi? -> n
-# Provide Venafi URL + DN
-# Install method -> 1 and your existing cert map names
-#   or -> 2 and your existing Cloud Build trigger name
-```
 
-Non-interactive:
-
-```bash
-NONINTERACTIVE=true DEPLOY_MODE=core \
-  PROJECT_ID=your-gcp-project \
-  USE_MOCK=false \
-  VENAFI_BASE_URL=https://venafi.example.com \
-  VENAFI_CERTIFICATE_DN='\\VED\\Policy\\Apps\\app.example.com' \
-  CERT_INSTALL_METHOD=cm_api \
-  CERT_MAP_NAME=your-existing-map \
-  CERT_MAP_ENTRY_NAME=your-existing-entry \
+NONINTERACTIVE=true PROJECT_ID=your-project USE_MOCK=true \
+  ALERT_EMAILS="you@example.com" FORCE_IMAGE_BUILD=true \
   ./scripts/deploy.sh
 ```
 
-Core does **not** seed expired certificates and does **not** create a load balancer.
+Priority: env var > existing tfvars > prompt > default.
 
-### Lab / validation (optional)
+### Terraform only (foundation / GCS state)
 
-```bash
-./scripts/deploy.sh
-# Deploy mode -> 2
+Scripts are optional. Copy `terraform/` and `services/` into your foundation:
+
+1. Copy `terraform/backend.tf.example` to `backend.tf` and set bucket/prefix.
+2. Copy `terraform.tfvars.example` to `terraform.tfvars` and fill values.
+3. Build and push images, or set `image_sync` / `image_mock`.
+4. `terraform init && terraform apply`
+5. For real Venafi, populate `{prefix}-venafi-*` secret versions (or `scripts/set-venafi-secrets.sh`).
+
+## Configuration
+
+See `terraform/terraform.tfvars.example`.
+
+```hcl
+scheduler_cron            = "0 6 * * *"
+scheduler_timezone        = "UTC"
+renew_days_before         = 30
+enable_mock               = false
+seed_mock_secret_versions = false
+enable_pubsub_events      = false
+alert_emails              = ["ops@example.com"]
 ```
 
-Lab seeds 1–2 near-expiry certs (~7 days left), puts that baseline on a temporary HTTPS status app, then leaves renew for the next sync / scheduler run so you can compare serial / fingerprint / expiry before and after.
+| Variable | Meaning |
+| --- | --- |
+| `scheduler_cron` / `scheduler_timezone` | When the sync job runs |
+| `renew_days_before` | Renew when days left is at or below this value |
+| `enable_mock` | Deploy mock Venafi Cloud Run service |
+| `seed_mock_secret_versions` | When mock is on, seed mock Venafi credentials into Secret Manager. Use `false` for real TPP |
+| `enable_pubsub_events` | Create optional events topic (default `false`) |
+| `alert_emails` | Monitoring notification emails |
 
----
+Venafi DN resolution: secret annotation `venafi-dn`, then TPP CN lookup, then `venafi_dn_prefix\CN`.
 
-## Day-2 operations
+## Pub/Sub
+
+Default off. Renew and email alerts do not use Pub/Sub. Enable only if another system must subscribe to job result messages.
+
+## Examples
 
 ```bash
-./scripts/run-sync.sh              # optional force renew
-./scripts/set-venafi-secrets.sh    # rotate real Venafi credentials
-./scripts/destroy.sh               # lab only, or everything
+cd examples/app-https-lb && ./scripts/deploy.sh
+# from repo root
+./scripts/run-sync.sh
+# then Cloud Build Triggers > venafi-cert-app-https-lb > Run
 ```
 
----
+Near-expiry seed is automatic (`SEED_NEAR_EXPIRY=false` to skip).
 
-## How to see a renew (lab)
+## Logging
 
-1. Open the lab URL from deploy (`https://LB_IP/` or `/api/cert`)
-2. Baseline after deploy: secret **v1**, ~7 days left (inside the 30-day renew window)
-3. `./scripts/run-sync.sh` with force renew = `n` (scheduler would do the same)
-4. Refresh: secret **v2**, ~90 days left; Serial / SHA-256 / Not after should change
+```bash
+./scripts/run-sync.sh
 
-Force renew (`y`) is only needed when the current cert is still outside the renew window.
+gcloud logging read \
+  'resource.type="cloud_run_job" AND resource.labels.job_name="venafi-cert-sync"' \
+  --limit=40 --format='value(textPayload)'
+```
 
----
+Renew events use `jsonPayload.message="VENAFI_CERT_EVENT"` and `status=renewed`.
 
-## Test matrix
+## Remove mock Venafi
 
-| # | Scenario | Mode | Expected |
-| --- | --- | --- | --- |
-| 1 | Client core deploy | 1 | Job + secrets + scheduler; no lab seeds; no lab LB |
-| 2 | Lab first run | 2 | Near-expiry seed on lab URL (~7d, v1); sync renews to ~90d (v2) |
-| 3 | Not due | either | `SKIPPED` when days left above threshold |
-| 4 | Force renew | either | New serial / fingerprint / secret version when cert is not yet due |
-| 5 | Real Venafi | 1 | Same job; credentials from Secret Manager only |
-| 6 | Tear down | destroy | Lab only or full cleanup |
+**Disable at runtime:** `enable_mock=false`, `seed_mock_secret_versions=false`, set real `venafi_base_url`, apply.
 
----
+**Remove from the package:**
 
-## Configuration reference
-
-| Knob | Core default | Meaning |
-| --- | --- | --- |
-| `DEPLOY_MODE` / deploy prompt | `core` | `core` or `lab` |
-| `enable_lab_stack` | `false` | Lab trigger / lab helpers |
-| `seed_expired_certificates` | `false` | Lab near-expiry seed toggle; must stay false for clients |
-| `seed_days_until_expiry` | `7` | Lab only; keep ≤ `renew_days_before` (default 30) |
-| `enable_mock` | `false` for clients | Mock TPP on Cloud Run |
-| `cert_install_method` | `cm_api` | `cm_api` \| `tf_cloudbuild` \| `none` |
-| `cert_map_name` / `cert_map_entry_name` | client values | Existing CM map (core + cm_api) |
-| `external_tf_cloudbuild_trigger` | client value | Existing trigger (core + tf_cloudbuild) |
-
-See `infra/foundation/terraform.tfvars.example`.
-
----
-
-## Security notes
-
-- Venafi passwords go only to Secret Manager (never committed tfvars)
-- Lab near-expiry seeding is intentional test data; keep it disabled in client projects
-- Prefer private egress from Cloud Run to corporate TPP in production
-
----
+1. Delete `services/mock-venafi/` and `terraform/mock_venafi.tf`
+2. Remove `enable_mock`, `seed_mock_secret_versions`, `mock_*`, `image_mock` from `terraform/variables.tf`
+3. Remove mock SA / invoker IAM from `terraform/iam.tf`
+4. Remove `venafi_*_mock` versions from `terraform/secrets.tf`
+5. In `terraform/cloud_run_job.tf`, always use `var.venafi_base_url` / `var.venafi_platform`
+6. Remove mock outputs and mock image build from scripts / `cloudbuild/build-images.yaml`
+7. Destroy any previously created mock Cloud Run service
 
 ## Cleanup
 
 ```bash
 ./scripts/destroy.sh
-# y = core + lab
-# n = lab verification stack only
+# prompted to also destroy examples; or:
+# DESTROY_EXAMPLES=true NONINTERACTIVE=true PROJECT_ID=... ./scripts/destroy.sh
 ```
+
+Example-only:
+
+```bash
+examples/app-https-lb/scripts/destroy.sh
+examples/edge-https-lb/scripts/destroy.sh
+```
+
+Or `terraform destroy` with the same backend and tfvars used to apply.

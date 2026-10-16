@@ -1,0 +1,21 @@
+substitutions:
+  _REGION: us-central1
+  _REPO: venafi-cert-app
+  _TAG: latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:${_TAG}
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:latest
+      - services/cert-status-app
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:${_TAG}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/cert-status-app:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY

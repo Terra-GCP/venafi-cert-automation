@@ -1,25 +1,26 @@
 # Scripts
 
-## Use these
-
-| Script | When |
+| Script | Purpose |
 | --- | --- |
-| `./scripts/deploy.sh` | Deploy. Mode **1 = core** (clients). Mode **2 = core + lab** (validation only). |
-| `./scripts/run-sync.sh` | Run one renew/sync cycle |
-| `./scripts/set-venafi-secrets.sh` | Store real Venafi credentials in Secret Manager |
-| `./scripts/destroy.sh` | Tear down lab only, or everything |
+| `./scripts/deploy.sh` | Deploy sync job, scheduler, alerts |
+| `./scripts/run-sync.sh` | Run one Secret Manager scan/renew |
+| `./scripts/set-venafi-secrets.sh` | Store real Venafi credentials |
+| `./scripts/destroy.sh` | Tear down core automation (asks whether to also destroy examples) |
 
-## Core vs lab
+## Prompt vs tfvars
 
-| | Core (mode 1) | Lab (mode 2) |
-| --- | --- | --- |
-| Purpose | Renew existing Venafi certificates in a client project | Prove the flow without corporate Venafi |
-| Near-expiry seed certs | No | Yes (1–2 near-expiry seeds; renew via sync, not during deploy) |
-| HTTPS status app / LB | No (use client's existing edge) | Yes (`infra/lab-https-lb`) |
-| Mock Venafi | Optional | Yes |
+Priority: env var > existing `terraform/terraform.tfvars` > prompt > default.
 
-See `scripts/lab/README.md` for lab details.
+```hcl
+# terraform/terraform.tfvars
+scheduler_cron     = "0 2 * * 1-5"
+scheduler_timezone = "America/New_York"
+renew_days_before  = 45
+alert_emails       = ["ops@example.com"]
+```
 
-## Do not run directly
+```bash
+SCHEDULER_CRON="0 */6 * * *" ./scripts/deploy.sh
+```
 
-`scripts/internal/` is used by deploy / Terraform helpers only.
+Deploy does not ask for certificate count, CN, or DN. The job discovers secrets at runtime.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 import os
 
 from cryptography import x509
@@ -22,11 +23,23 @@ INITIAL_DAYS_LEFT = int(os.getenv("MOCK_INITIAL_DAYS_LEFT", "7"))
 RENEW_VALIDITY_DAYS = int(os.getenv("MOCK_RENEW_VALIDITY_DAYS", "90"))
 TOKEN = "mock-access-token"
 
+try:
+    CERT_MAP: dict[str, str] = json.loads(os.getenv("MOCK_CERT_MAP", "{}") or "{}")
+except json.JSONDecodeError:
+    CERT_MAP = {}
+
 _STORE: dict[str, dict] = {}
 
 
 def _auth_ok() -> bool:
     return request.headers.get("Authorization", "") == f"Bearer {TOKEN}"
+
+
+def _cn_for_dn(dn: str) -> str:
+    if dn in CERT_MAP and CERT_MAP[dn]:
+        return CERT_MAP[dn]
+    leaf = dn.replace("/", "\\").rstrip("\\").split("\\")[-1]
+    return leaf or CERT_CN
 
 
 def _issue_bundle(cn: str, p12_password: str, days_valid: int) -> tuple[bytes, dt.datetime]:
@@ -69,11 +82,12 @@ def _issue_bundle(cn: str, p12_password: str, days_valid: int) -> tuple[bytes, d
 
 def _ensure(dn: str, password: str) -> dict:
     if dn not in _STORE:
-        p12, valid_to = _issue_bundle(CERT_CN, password, INITIAL_DAYS_LEFT)
+        cn = _cn_for_dn(dn)
+        p12, valid_to = _issue_bundle(cn, password, INITIAL_DAYS_LEFT)
         _STORE[dn] = {
             "p12": p12,
             "valid_to": valid_to,
-            "cn": CERT_CN,
+            "cn": cn,
             "password": password,
         }
     return _STORE[dn]
@@ -81,7 +95,7 @@ def _ensure(dn: str, password: str) -> dict:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "certs": len(_STORE)}
+    return {"status": "ok", "certs": len(_STORE), "mapped": len(CERT_MAP)}
 
 
 @app.post("/vedauth/authorize/oauth")
@@ -101,19 +115,32 @@ def list_certificates():
     if not _auth_ok():
         return jsonify({"error": "unauthorized"}), 401
     password = DEFAULT_P12_PASSWORD
-    entry = _ensure(DEFAULT_DN, password)
-    return jsonify(
-        {
-            "Certificates": [
-                {
-                    "DN": DEFAULT_DN,
-                    "Name": entry["cn"],
-                    "CN": entry["cn"],
-                    "ValidTo": entry["valid_to"].strftime("%Y-%m-%dT%H:%M:%SZ"),
-                }
-            ]
-        }
-    )
+    cn_filter = (request.args.get("CN") or "").strip().lower()
+
+    # Always include mapped DNs plus any already-issued store entries.
+    dns = list(dict.fromkeys(list(CERT_MAP.keys()) + list(_STORE.keys())))
+    if not dns and not cn_filter:
+        dns = [DEFAULT_DN]
+    if cn_filter:
+        # Ensure a DN exists for CN-based discovery (example/lab flow).
+        candidate = rf"\VED\Policy\Apps\{request.args.get('CN').strip()}"
+        if candidate not in dns:
+            dns.append(candidate)
+
+    certs = []
+    for dn in dns:
+        entry = _ensure(dn, password)
+        if cn_filter and entry["cn"].lower() != cn_filter:
+            continue
+        certs.append(
+            {
+                "DN": dn,
+                "Name": entry["cn"],
+                "CN": entry["cn"],
+                "ValidTo": entry["valid_to"].strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+        )
+    return jsonify({"Certificates": certs})
 
 
 @app.post("/vedsdk/Certificates/Renew")
@@ -123,11 +150,12 @@ def renew_certificate():
     data = request.get_json(silent=True) or {}
     dn = data.get("CertificateDN") or request.args.get("CertificateDN") or DEFAULT_DN
     password = data.get("Password") or DEFAULT_P12_PASSWORD
-    p12, valid_to = _issue_bundle(CERT_CN, password, RENEW_VALIDITY_DAYS)
+    cn = _cn_for_dn(dn)
+    p12, valid_to = _issue_bundle(cn, password, RENEW_VALIDITY_DAYS)
     _STORE[dn] = {
         "p12": p12,
         "valid_to": valid_to,
-        "cn": CERT_CN,
+        "cn": cn,
         "password": password,
     }
     return jsonify(

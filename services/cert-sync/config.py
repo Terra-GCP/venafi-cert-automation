@@ -25,6 +25,13 @@ def _int(name: str, default: int) -> int:
     return int(raw.strip())
 
 
+def _csv(name: str) -> tuple[str, ...]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return ()
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     platform: str
@@ -33,34 +40,26 @@ class Settings:
     password: str
     access_token: str
     api_key: str
-    certificate_dn: str
     p12_password: str
     tls_verify: bool
-    cert_name: str
     gcp_project_id: str
-    secret_cert_name: str
-    secret_key_name: str
     create_secrets_if_missing: bool
     notify_topic: str
-    cert_install_method: str
-    cert_map_name: str
-    cert_map_entry_name: str
-    tf_cloudbuild_trigger: str
-    tf_cloudbuild_trigger_region: str
     region: str
     renew_enabled: bool
     renew_days_before: int
     force_renew: bool
+    secret_cert_suffix: str
+    secret_key_suffix: str
+    secret_exclude_prefixes: tuple[str, ...]
+    venafi_dn_label_key: str
+    venafi_dn_prefix: str
 
 
 def load_settings() -> Settings:
-    platform = os.getenv("VENAFI_PLATFORM", "mock").strip().lower()
+    platform = os.getenv("VENAFI_PLATFORM", "tpp").strip().lower()
     if platform not in {"mock", "tpp", "cloud"}:
         raise SystemExit("VENAFI_PLATFORM must be mock, tpp, or cloud")
-
-    method = os.getenv("CERT_INSTALL_METHOD", "none").strip().lower()
-    if method not in {"cm_api", "tf_cloudbuild", "none"}:
-        raise SystemExit("CERT_INSTALL_METHOD must be cm_api, tf_cloudbuild, or none")
 
     return Settings(
         platform=platform,
@@ -69,24 +68,22 @@ def load_settings() -> Settings:
         password=os.getenv("VENAFI_PASSWORD", "").strip(),
         access_token=os.getenv("VENAFI_ACCESS_TOKEN", "").strip(),
         api_key=os.getenv("VENAFI_API_KEY", "").strip(),
-        certificate_dn=_require("VENAFI_CERTIFICATE_DN"),
         p12_password=_require("VENAFI_P12_PASSWORD"),
         tls_verify=_bool("VENAFI_TLS_VERIFY", True),
-        cert_name=os.getenv("CERT_NAME", "app-tls").strip() or "app-tls",
         gcp_project_id=_require("GCP_PROJECT_ID"),
-        secret_cert_name=os.getenv("SECRET_CERT_NAME", "").strip(),
-        secret_key_name=os.getenv("SECRET_KEY_NAME", "").strip(),
-        create_secrets_if_missing=_bool("CREATE_SECRETS_IF_MISSING", True),
+        create_secrets_if_missing=_bool("CREATE_SECRETS_IF_MISSING", False),
         notify_topic=os.getenv("NOTIFY_TOPIC", "").strip(),
-        cert_install_method=method,
-        cert_map_name=os.getenv("CERT_MAP_NAME", "").strip(),
-        cert_map_entry_name=os.getenv("CERT_MAP_ENTRY_NAME", "").strip(),
-        tf_cloudbuild_trigger=os.getenv("TF_CLOUDBUILD_TRIGGER", "").strip(),
-        tf_cloudbuild_trigger_region=os.getenv("TF_CLOUDBUILD_TRIGGER_REGION", "").strip()
-        or os.getenv("GCP_REGION", "us-central1").strip()
-        or "us-central1",
         region=os.getenv("GCP_REGION", "us-central1").strip() or "us-central1",
         renew_enabled=_bool("RENEW_ENABLED", True),
         renew_days_before=_int("RENEW_DAYS_BEFORE", 30),
         force_renew=_bool("FORCE_RENEW", False),
+        secret_cert_suffix=os.getenv("SECRET_CERT_SUFFIX", "-certificate").strip()
+        or "-certificate",
+        secret_key_suffix=os.getenv("SECRET_KEY_SUFFIX", "-private-key").strip()
+        or "-private-key",
+        secret_exclude_prefixes=_csv("SECRET_EXCLUDE_PREFIXES"),
+        venafi_dn_label_key=os.getenv("VENAFI_DN_LABEL_KEY", "venafi-dn").strip()
+        or "venafi-dn",
+        venafi_dn_prefix=os.getenv("VENAFI_DN_PREFIX", r"\VED\Policy\Apps").strip()
+        or r"\VED\Policy\Apps",
     )
