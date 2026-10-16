@@ -5,9 +5,11 @@
 | `./scripts/deploy.sh` | Deploy sync job, scheduler, alerts |
 | `./scripts/run-sync.sh` | Run one Secret Manager scan/renew |
 | `./scripts/set-venafi-secrets.sh` | Store real Venafi credentials |
-| `./scripts/destroy.sh` | Tear down core automation (asks whether to also destroy examples) |
+| `./scripts/destroy.sh` | Tear down core automation only (examples have their own destroy scripts) |
 
 ## Prompt vs tfvars
+
+Applies to `deploy.sh` and `destroy.sh` (core and examples).
 
 Priority: env var > existing `terraform/terraform.tfvars` > prompt > default.
 

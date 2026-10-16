@@ -366,8 +366,7 @@ Near-expiry seed is automatic (`SEED_NEAR_EXPIRY=false` to skip). Status pages s
 
 ```bash
 ./scripts/destroy.sh
-# prompted to also destroy examples; or:
-# DESTROY_EXAMPLES=true NONINTERACTIVE=true PROJECT_ID=... ./scripts/destroy.sh
+# core only — examples are separate
 ```
 
 ```bash

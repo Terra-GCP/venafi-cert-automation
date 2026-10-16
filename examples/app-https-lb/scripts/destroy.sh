@@ -7,35 +7,52 @@ REPO_ROOT="$(cd "${EXAMPLE_ROOT}/../.." && pwd)"
 source "${REPO_ROOT}/scripts/internal/lib.sh"
 cd "${EXAMPLE_ROOT}"
 
+TFVARS="${EXAMPLE_ROOT}/terraform/terraform.tfvars"
 NONINTERACTIVE="${NONINTERACTIVE:-false}"
 
-if [[ "${NONINTERACTIVE}" == "true" ]]; then
-  PROJECT_ID="${PROJECT_ID:-}"
-  REGION="${REGION:-us-central1}"
-  APP_PREFIX="${APP_PREFIX:-venafi-cert-app}"
-  CERT_NAME="${CERT_NAME:-app-tls}"
-  if [[ -z "${PROJECT_ID}" ]]; then
-    echo "PROJECT_ID is required when NONINTERACTIVE=true" >&2
-    exit 1
-  fi
-else
-  echo ""
-  echo "Delete example app HTTPS LB stack"
-  echo ""
-  PROJECT_ID="$(ask "GCP project ID" "${PROJECT_ID:-}")"
-  REGION="$(ask "GCP region" "${REGION:-us-central1}")"
-  APP_PREFIX="$(ask "Example stack name prefix" "${APP_PREFIX:-venafi-cert-app}")"
-  CERT_NAME="$(ask "Cert logical name" "${CERT_NAME:-app-tls}")"
+PROJECT_ID="${PROJECT_ID:-}"
+REGION="${REGION:-}"
+APP_PREFIX="${APP_PREFIX:-}"
+CERT_NAME="${CERT_NAME:-}"
+TF_BUCKET="${TF_BUCKET:-}"
+
+echo ""
+echo "Delete example app HTTPS LB stack"
+echo "  Env and terraform.tfvars values are reused; only missing values are prompted"
+echo ""
+
+resolve_str PROJECT_ID "GCP project ID" "" "project_id" "${TFVARS}"
+resolve_str REGION "GCP region" "us-central1" "region" "${TFVARS}"
+resolve_str APP_PREFIX "Example stack name prefix" "venafi-cert-app" "name_prefix" "${TFVARS}"
+
+if [[ -z "${CERT_NAME}" ]] && tfvar_has "${TFVARS}" "secret_cert_name"; then
+  CERT_NAME="$(tfvar_get "${TFVARS}" "secret_cert_name")"
+  CERT_NAME="${CERT_NAME%-certificate}"
+  echo "  CERT_NAME=${CERT_NAME} (from terraform.tfvars)" >&2
+fi
+resolve_str CERT_NAME "Cert logical name" "app-tls"
+
+if [[ -z "${TF_BUCKET}" ]] && tfvar_has "${TFVARS}" "tf_state_bucket"; then
+  TF_BUCKET="$(tfvar_get "${TFVARS}" "tf_state_bucket")"
+  echo "  TF_BUCKET=${TF_BUCKET} (from terraform.tfvars)" >&2
+fi
+
+if [[ -z "${PROJECT_ID}" ]]; then
+  echo "GCP project ID is required" >&2
+  exit 1
+fi
+
+if [[ "${NONINTERACTIVE}" != "true" ]]; then
   ask_yn "Are you sure?" "y" || { echo "Cancelled."; exit 0; }
 fi
 
 SECRET_CERT="${CERT_NAME}-certificate"
 SECRET_KEY="${CERT_NAME}-private-key"
-TF_BUCKET="${PROJECT_ID}-${APP_PREFIX}-tf"
+TF_BUCKET="${TF_BUCKET:-${PROJECT_ID}-${APP_PREFIX}-tf}"
 gcloud config set project "${PROJECT_ID}" >/dev/null
 
 echo "Destroying example stack..."
-cat > terraform/terraform.tfvars <<EOF
+cat > "${TFVARS}" <<EOF
 project_id         = "${PROJECT_ID}"
 region             = "${REGION}"
 name_prefix        = "${APP_PREFIX}"
@@ -73,7 +90,6 @@ gcloud pubsub topics delete "${p}-tf-apply" --project="${PROJECT_ID}" --quiet 2>
 gcloud artifacts repositories delete "${p}" --location="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
 gsutil -m rm -r "gs://${TF_BUCKET}" >/dev/null 2>&1 || true
 
-# Secrets were created by the example seed script (not Terraform).
 gcloud secrets delete "${SECRET_CERT}" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
 gcloud secrets delete "${SECRET_KEY}" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
 

@@ -6,50 +6,37 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${ROOT}/scripts/internal/lib.sh"
 cd "$ROOT"
 
+TFVARS="${ROOT}/terraform/terraform.tfvars"
 NONINTERACTIVE="${NONINTERACTIVE:-false}"
-DESTROY_EXAMPLES="${DESTROY_EXAMPLES:-false}"
 
-if [[ "${NONINTERACTIVE}" == "true" ]]; then
-  PROJECT_ID="${PROJECT_ID:-}"
-  REGION="${REGION:-us-central1}"
-  PREFIX="${PREFIX:-venafi-cert}"
-  if [[ -z "${PROJECT_ID}" ]]; then
-    echo "PROJECT_ID is required when NONINTERACTIVE=true" >&2
-    exit 1
-  fi
-else
-  echo ""
-  echo "Delete Venafi certificate automation"
-  echo ""
-  PROJECT_ID="$(ask "GCP project ID" "${PROJECT_ID:-}")"
-  REGION="$(ask "GCP region" "${REGION:-us-central1}")"
-  PREFIX="$(ask "Resource name prefix" "${PREFIX:-venafi-cert}")"
-  if ask_yn "Also destroy example stacks (app-https-lb / edge-https-lb)?" "y"; then
-    DESTROY_EXAMPLES=true
-  fi
-  ask_yn "Are you sure?" "y" || { echo "Cancelled."; exit 0; }
-fi
+PROJECT_ID="${PROJECT_ID:-}"
+REGION="${REGION:-}"
+PREFIX="${PREFIX:-}"
+
+echo ""
+echo "Delete Venafi certificate automation (core only)"
+echo "  Env and terraform.tfvars values are reused; only missing values are prompted"
+echo "  Example stacks are separate: examples/*/scripts/destroy.sh"
+echo ""
+
+resolve_str PROJECT_ID "GCP project ID" "" "project_id" "${TFVARS}"
+resolve_str REGION "GCP region" "us-central1" "region" "${TFVARS}"
+resolve_str PREFIX "Resource name prefix" "venafi-cert" "name_prefix" "${TFVARS}"
 
 if [[ -z "${PROJECT_ID}" ]]; then
-  echo "GCP project ID is required" >&2
+  echo "GCP project ID is required (set project_id in terraform.tfvars, PROJECT_ID=…, or answer the prompt)" >&2
   exit 1
+fi
+
+if [[ "${NONINTERACTIVE}" != "true" ]]; then
+  ask_yn "Are you sure?" "y" || { echo "Cancelled."; exit 0; }
 fi
 
 gcloud config set project "${PROJECT_ID}" >/dev/null
 
-if [[ "${DESTROY_EXAMPLES}" == "true" ]]; then
-  echo "Destroying example stacks..."
-  NONINTERACTIVE=true PROJECT_ID="${PROJECT_ID}" REGION="${REGION}" \
-    APP_PREFIX=venafi-cert-app CERT_NAME=app-tls \
-    "${ROOT}/examples/app-https-lb/scripts/destroy.sh" || true
-  NONINTERACTIVE=true PROJECT_ID="${PROJECT_ID}" REGION="${REGION}" \
-    APP_PREFIX=venafi-cert-edge CERT_NAME=edge-tls \
-    "${ROOT}/examples/edge-https-lb/scripts/destroy.sh" || true
-fi
-
 echo "Deleting core automation..."
-if [[ ! -f terraform/terraform.tfvars ]]; then
-  cat > terraform/terraform.tfvars <<EOF
+if [[ ! -f "${TFVARS}" ]]; then
+  cat > "${TFVARS}" <<EOF
 project_id  = "${PROJECT_ID}"
 region      = "${REGION}"
 name_prefix = "${PREFIX}"
@@ -75,20 +62,14 @@ for sa in sync mock sched; do
   gcloud iam service-accounts delete "${PREFIX}-${sa}@${PROJECT_ID}.iam.gserviceaccount.com" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
 done
 
-# Venafi creds + common example TLS secrets created outside Terraform.
 for secret in \
   "${PREFIX}-venafi-username" \
   "${PREFIX}-venafi-password" \
-  "${PREFIX}-venafi-p12-password" \
-  app-tls-certificate \
-  app-tls-private-key \
-  edge-tls-certificate \
-  edge-tls-private-key
+  "${PREFIX}-venafi-p12-password"
 do
   gcloud secrets delete "${secret}" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
 done
 
-# Monitoring leftovers matching this prefix only.
 while IFS= read -r policy; do
   [[ -z "${policy}" ]] && continue
   gcloud monitoring policies delete "${policy}" --project="${PROJECT_ID}" --quiet 2>/dev/null || true
@@ -104,10 +85,5 @@ done < <(
     --filter="displayName:${PREFIX}" --format='value(name)' 2>/dev/null || true
 )
 
-echo "Done."
-if [[ "${DESTROY_EXAMPLES}" != "true" ]]; then
-  echo "Example stacks were not destroyed. If still present:"
-  echo "  examples/app-https-lb/scripts/destroy.sh"
-  echo "  examples/edge-https-lb/scripts/destroy.sh"
-  echo "Or re-run with DESTROY_EXAMPLES=true"
-fi
+echo "Done (core only)."
+echo "Examples (if deployed): examples/app-https-lb/scripts/destroy.sh and examples/edge-https-lb/scripts/destroy.sh"
