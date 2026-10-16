@@ -52,18 +52,57 @@ Core does **not** invent application TLS secrets or create client load balancers
 
 ---
 
-## Why mock Venafi (instead of real Venafi first)
+## Mock vs real Venafi
 
-Corporate Venafi access is often not available up front. Reachability from Cloud Run, service accounts, certificate policy DNs, and export passwords usually need security / PKI approvals.
+**Important:** Moving from mock to real Venafi (or deploying real Venafi from day one) needs **config and credentials only**. There is **no application or job code change**. The same `cert-sync` image talks to either endpoint.
 
-The **mock Venafi TPP API** simulates authorize / renew / retrieve so the full Google Cloud path (job, scheduler, Secret Manager, logging, alerts) can be proven end to end. When corporate Venafi is ready:
+| Mode | When to use | What you set |
+| --- | --- | --- |
+| Mock | Corporate TPP not reachable yet; dry-run / validation | `enable_mock=true`, `seed_mock_secret_versions=true` |
+| Real TPP | Client / production | `enable_mock=false`, real `venafi_base_url`, real SM credentials |
+
+### Why mock exists
+
+Corporate Venafi access is often not available up front. Reachability from Cloud Run, accounts, policy DNs, and export passwords usually need security / PKI approvals.
+
+The optional **mock Venafi TPP API** simulates authorize / renew / retrieve so the Google Cloud path (job, scheduler, Secret Manager, logging, alerts) can be proven end to end first. Mock is optional; clients can ignore it and deploy against real TPP immediately.
+
+### Deploy with real Venafi (recommended for clients)
+
+```bash
+# terraform/terraform.tfvars (or answer deploy prompts)
+enable_mock               = false
+seed_mock_secret_versions = false
+venafi_platform           = "tpp"
+venafi_base_url           = "https://venafi.example.com"
+# alert_emails, scheduler_cron, renew_days_before as needed
+
+./scripts/deploy.sh
+# When prompted / after apply: store real username, password, p12 password
+./scripts/set-venafi-secrets.sh
+```
+
+Non-interactive:
+
+```bash
+NONINTERACTIVE=true PROJECT_ID=your-project USE_MOCK=false \
+  VENAFI_BASE_URL=https://venafi.example.com \
+  ALERT_EMAILS="ops@example.com" \
+  ./scripts/deploy.sh
+./scripts/set-venafi-secrets.sh
+```
+
+Ensure application certs already exist in Secret Manager as `*-certificate` / `*-private-key` (or deploy an example only for demos). Optional annotation `venafi-dn` on the cert secret helps DN resolution.
+
+### Switch from mock to real (no code change)
 
 1. Set `enable_mock=false` and `seed_mock_secret_versions=false`
 2. Set `venafi_base_url` to the real TPP URL
-3. Store real credentials with `./scripts/set-venafi-secrets.sh` (or your secret pipeline)
-4. Apply again
+3. `terraform apply` (or re-run `./scripts/deploy.sh`)
+4. `./scripts/set-venafi-secrets.sh` with real credentials
+5. `./scripts/run-sync.sh` to verify
 
-No application rewrite is required. Mock is **optional**. Keeping it in the repo is fine; clients simply leave it disabled.
+Same job image and same discovery logic; only the Venafi URL and secrets change.
 
 ---
 
@@ -243,17 +282,13 @@ Values already set in env or `terraform/terraform.tfvars` are not prompted.
 # Prefer editing terraform/terraform.tfvars first
 ./scripts/deploy.sh
 
-# Dry-run with mock
+# Dry-run with mock (optional)
 NONINTERACTIVE=true PROJECT_ID=your-project USE_MOCK=true \
   ALERT_EMAILS="you@example.com" FORCE_IMAGE_BUILD=true \
   ./scripts/deploy.sh
-
-# Real Venafi
-NONINTERACTIVE=true PROJECT_ID=your-project USE_MOCK=false \
-  VENAFI_BASE_URL=https://venafi.example.com \
-  ALERT_EMAILS="ops@example.com" \
-  ./scripts/deploy.sh
 ```
+
+For **real Venafi**, see [Mock vs real Venafi](#mock-vs-real-venafi) (config only; no code change).
 
 Priority: env var > existing tfvars > prompt > default.
 
