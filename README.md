@@ -230,7 +230,7 @@ Pub/Sub is **not** required for renew or email. It stays off unless `enable_pubs
 | Cloud Scheduler | `venafi-cert-daily` | Yes |
 | Service accounts | `venafi-cert-sync`, `venafi-cert-sched` | Yes |
 | Secret Manager | `venafi-cert-venafi-username`, `-password`, `-p12-password` | Yes |
-| IAM | Sync SA = Secret Manager admin; scheduler runs job; Cloud Build pushes images | Yes |
+| IAM | Sync SA = SM viewer/accessor/versionAdder; scheduler invokes job; Build SAs = AR writer + log writer | Yes |
 | Monitoring email channel | From `alert_emails` | If emails set |
 | Alert policy (renewed / failed) | Prefixed alert policies | If alerts + channels |
 | Mock Cloud Run service | `venafi-cert-mock` | Only `enable_mock=true` |
@@ -272,13 +272,60 @@ sequenceDiagram
 
 ---
 
+## Prerequisites
+
+### Tools
+
+`bash`, `gcloud`, `terraform`, and `python3` (Cloud Shell, macOS, or Linux). Authenticate and select the target project:
+
+```bash
+gcloud auth login
+gcloud auth application-default login   # for Terraform
+gcloud config set project YOUR_PROJECT_ID
+```
+
+### Identity running deploy / destroy
+
+The Google account (or SA) that runs `./scripts/deploy.sh` must be able to enable APIs, create IAM bindings, and manage Run / Cloud Build / Artifact Registry / Secret Manager / Scheduler / Monitoring. In practice that is usually **Project Owner**, or an equivalent custom role set that includes at least:
+
+| Area | Typical roles |
+| --- | --- |
+| APIs | `roles/serviceusage.serviceUsageAdmin` |
+| IAM / SAs | `roles/resourcemanager.projectIamAdmin`, `roles/iam.serviceAccountAdmin`, `roles/iam.serviceAccountUser` |
+| Deploy | `roles/run.admin`, `roles/cloudscheduler.admin`, `roles/secretmanager.admin`, `roles/artifactregistry.admin`, `roles/cloudbuild.builds.editor`, `roles/logging.admin`, `roles/monitoring.admin` |
+| Examples (extra) | `roles/compute.admin`, `roles/certificatemanager.editor`, `roles/storage.admin` |
+
+You also need permission to act as the default Compute Engine service account when Cloud Build uses it (`iam.serviceAccounts.actAs` on `{PROJECT_NUMBER}-compute@developer.gserviceaccount.com`).
+
+### Cloud Build service accounts (image push)
+
+`gcloud builds submit` runs as either `{PROJECT_NUMBER}@cloudbuild.gserviceaccount.com` or `{PROJECT_NUMBER}-compute@developer.gserviceaccount.com` (many projects use the Compute default SA). Terraform grants both only:
+
+- `roles/artifactregistry.writer`
+- `roles/logging.logWriter`
+
+Deploy applies Terraform **before** the image build so these bindings exist first. If a build still fails on the Compute SA, confirm those roles (org policy can block or delay IAM).
+
+### Runtime IAM (least privilege)
+
+| Account | Purpose | Grants |
+| --- | --- | --- |
+| `{prefix}-sync` | Cloud Run sync job | SM Viewer + Secret Accessor + Secret Version Adder (no SM Admin); topic Publisher only if Pub/Sub events on; can invoke mock when enabled |
+| `{prefix}-sched` | Cloud Scheduler | Run Invoker on the sync job only |
+| `{prefix}-mock` | Optional mock Venafi | No project roles; invokable only by the sync SA |
+| Cloud Build / Compute default SAs | Image build/push | Artifact Registry Writer + Log Writer |
+
+The deploy identity is intentionally broader (bootstrap). Runtime service accounts are scoped to what each component needs. Sync can read/list project secrets and add versions (required for discovery); it cannot delete secrets or change secret IAM. Example stacks keep a public Run Invoker on the status app so the external HTTPS LB can reach it (demo-only).
+
+---
+
 ## Deploy
 
 ### Scripts
 
 Values already set in env or `terraform/terraform.tfvars` are not prompted.
 
-`./scripts/deploy.sh` enables APIs, applies Terraform once, builds/pushes images, then updates Cloud Run. Local state uses a per-`project_id` workspace. Requires `bash`, `gcloud`, `terraform`, and `python3`.
+`./scripts/deploy.sh` enables APIs, applies Terraform once (including Cloud Build SA roles), builds/pushes images, then updates Cloud Run. Local state uses a per-`project_id` workspace.
 
 ```bash
 # Prefer editing terraform/terraform.tfvars first
@@ -368,7 +415,7 @@ Near-expiry seed is automatic (`SEED_NEAR_EXPIRY=false` to skip). Status pages s
 
 ```bash
 ./scripts/destroy.sh
-# core only — examples are separate
+# core only; examples are separate
 ```
 
 ```bash

@@ -15,13 +15,14 @@ resource "google_storage_bucket_iam_member" "build_tf_admin" {
 resource "google_project_iam_member" "build_roles" {
   for_each = {
     for pair in setproduct(tolist(local.build_sas), [
-      "roles/secretmanager.admin",
+      "roles/secretmanager.viewer",
+      "roles/secretmanager.secretAccessor",
       "roles/certificatemanager.editor",
-      "roles/compute.admin",
-      "roles/iam.serviceAccountAdmin",
-      "roles/artifactregistry.writer",
-      "roles/run.admin",
+      "roles/compute.loadBalancerAdmin",
       "roles/iam.serviceAccountUser",
+      "roles/artifactregistry.writer",
+      "roles/logging.logWriter",
+      "roles/run.developer",
     ]) : "${pair[0]}-${pair[1]}" => { member = pair[0], role = pair[1] }
   }
   project = var.project_id

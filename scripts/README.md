@@ -1,6 +1,6 @@
 # Scripts
 
-Requires `bash`, `gcloud`, `terraform`, and `python3` (works on Cloud Shell, macOS, and Linux).
+Requires `bash`, `gcloud`, `terraform`, and `python3` (Cloud Shell, macOS, Linux). The caller needs project Owner (or equivalent) plus `iam.serviceAccounts.actAs` on the default Compute Engine SA. See [Prerequisites](../README.md#prerequisites) in the main README for the full role list and Cloud Build SA grants.
 
 | Script | Purpose |
 | --- | --- |
