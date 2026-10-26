@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
+import google.auth.transport.requests
+import google.oauth2.id_token
 import requests
 
 from config import Settings
@@ -12,6 +15,15 @@ class VenafiClient:
         self.settings = settings
         self.session = requests.Session()
         self.session.verify = settings.tls_verify
+        self._attach_cloud_run_identity()
+
+    def _attach_cloud_run_identity(self) -> None:
+        host = urlparse(self.settings.base_url).hostname or ""
+        if not host.endswith(".run.app"):
+            return
+        request = google.auth.transport.requests.Request()
+        token = google.oauth2.id_token.fetch_id_token(request, self.settings.base_url)
+        self.session.headers["X-Serverless-Authorization"] = f"Bearer {token}"
 
     def authenticate(self) -> str:
         if self.settings.platform == "cloud":
