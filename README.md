@@ -140,7 +140,7 @@ venafi-cert-automation/
 │   └── mock-venafi/               # Optional mock TPP (authorize/renew/retrieve)
 ├── scripts/
 │   ├── deploy.sh                  # Deploy core (tfvars-first prompts)
-│   ├── destroy.sh                 # Tear down core (+ optional examples)
+│   ├── destroy.sh                 # Tear down core only
 │   ├── run-sync.sh                # One-shot job execution
 │   ├── set-venafi-secrets.sh      # Real Venafi credentials into SM
 │   ├── README.md
@@ -278,6 +278,8 @@ sequenceDiagram
 
 Values already set in env or `terraform/terraform.tfvars` are not prompted.
 
+`./scripts/deploy.sh` enables APIs, applies Terraform once, builds/pushes images, then updates Cloud Run. Local state uses a per-`project_id` workspace. Requires `bash`, `gcloud`, `terraform`, and `python3`.
+
 ```bash
 # Prefer editing terraform/terraform.tfvars first
 ./scripts/deploy.sh
@@ -298,8 +300,8 @@ Scripts are optional. Copy `terraform/` and `services/` into your foundation:
 
 1. Copy `terraform/backend.tf.example` to `backend.tf` and set bucket/prefix
 2. Copy `terraform.tfvars.example` to `terraform.tfvars` and fill values
-3. Build and push images, or set `image_sync` / `image_mock`
-4. `terraform init && terraform apply`
+3. `terraform init && terraform apply`
+4. Build/push images and update the Cloud Run job (and mock service if enabled), or set `image_sync` / `image_mock` before apply
 5. For real Venafi, populate `{prefix}-venafi-*` secret versions
 
 ---

@@ -141,6 +141,7 @@ resource "google_cloud_run_v2_job" "cert_sync" {
     ignore_changes = [
       client,
       client_version,
+      template[0].template[0].containers[0].image,
     ]
   }
 }

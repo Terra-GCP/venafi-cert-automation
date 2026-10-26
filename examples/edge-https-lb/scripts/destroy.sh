@@ -58,7 +58,6 @@ region             = "${REGION}"
 name_prefix        = "${APP_PREFIX}"
 secret_cert_name   = "${SECRET_CERT}"
 secret_key_name    = "${SECRET_KEY}"
-status_app_image   = "placeholder"
 tf_state_bucket    = "${TF_BUCKET}"
 EOF
 

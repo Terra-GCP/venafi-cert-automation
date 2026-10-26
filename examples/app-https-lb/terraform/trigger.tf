@@ -76,7 +76,7 @@ resource "google_cloudbuild_trigger" "app_https_lb" {
         name_prefix        = "${var.name_prefix}"
         secret_cert_name   = "${var.secret_cert_name}"
         secret_key_name    = "${var.secret_key_name}"
-        status_app_image   = "${var.status_app_image}"
+        status_app_image   = "${local.ar_status_image}"
         tf_state_bucket    = "${var.tf_state_bucket}"
         EOF
         terraform init -input=false -reconfigure \

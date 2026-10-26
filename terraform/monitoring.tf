@@ -1,6 +1,5 @@
 locals {
-  sync_job_name = "${var.name_prefix}-sync"
-  # Use known inputs only (not channel IDs created in the same apply).
+  sync_job_name      = "${var.name_prefix}-sync"
   has_alert_channels = length(var.alert_emails) > 0 || length(var.notification_channel_ids) > 0
   created_email_channels = [
     for ch in google_monitoring_notification_channel.email : ch.id

@@ -31,7 +31,6 @@ gcloud config set project "${PROJECT_ID}" >/dev/null
 
 echo "Running sync job ${JOB_NAME}..."
 if [[ "${FORCE}" == "true" ]]; then
-  # Override for this execution only (no Terraform change required).
   gcloud run jobs execute "${JOB_NAME}" \
     --project="${PROJECT_ID}" \
     --region="${REGION}" \

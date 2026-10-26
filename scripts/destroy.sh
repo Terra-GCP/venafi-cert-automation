@@ -46,8 +46,14 @@ fi
 
 cd terraform
 terraform init -input=false -reconfigure >/dev/null || true
-if [[ -f terraform.tfstate ]] && [[ "$(terraform state list 2>/dev/null | wc -l | tr -d ' ')" != "0" ]]; then
-  terraform destroy -input=false -auto-approve || true
+if terraform workspace select "${PROJECT_ID}" >/dev/null 2>&1; then
+  if [[ "$(terraform state list 2>/dev/null | wc -l | tr -d ' ')" != "0" ]]; then
+    terraform destroy -input=false -auto-approve || true
+  fi
+else
+  if [[ -f terraform.tfstate ]] && [[ "$(terraform state list 2>/dev/null | wc -l | tr -d ' ')" != "0" ]]; then
+    terraform destroy -input=false -auto-approve || true
+  fi
 fi
 cd "$ROOT"
 

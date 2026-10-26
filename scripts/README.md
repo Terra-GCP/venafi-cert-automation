@@ -1,8 +1,10 @@
 # Scripts
 
+Requires `bash`, `gcloud`, `terraform`, and `python3` (works on Cloud Shell, macOS, and Linux).
+
 | Script | Purpose |
 | --- | --- |
-| `./scripts/deploy.sh` | Deploy sync job, scheduler, alerts |
+| `./scripts/deploy.sh` | Apply Terraform, build images, update Cloud Run |
 | `./scripts/run-sync.sh` | Run one Secret Manager scan/renew |
 | `./scripts/set-venafi-secrets.sh` | Store real Venafi credentials |
 | `./scripts/destroy.sh` | Tear down core automation only (examples have their own destroy scripts) |

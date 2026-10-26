@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Deploy helpers: env > terraform.tfvars > prompt > default.
 
 ask() {
   local prompt="$1" default="${2:-}" reply

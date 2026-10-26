@@ -1,3 +1,9 @@
+locals {
+  placeholder_image = "us-docker.pkg.dev/cloudrun/container/hello"
+  ar_status_image   = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.app.repository_id}/edge-status-app:latest"
+  status_app_image  = trimspace(var.status_app_image) != "" ? var.status_app_image : local.placeholder_image
+}
+
 resource "google_cloud_run_v2_service" "status_app" {
   name     = "${var.name_prefix}-app"
   location = var.region
@@ -6,7 +12,7 @@ resource "google_cloud_run_v2_service" "status_app" {
   template {
     service_account = google_service_account.status_app.email
     containers {
-      image = var.status_app_image
+      image = local.status_app_image
       ports {
         container_port = 8080
       }
@@ -28,6 +34,14 @@ resource "google_cloud_run_v2_service" "status_app" {
   }
 
   depends_on = [google_project_service.apis]
+
+  lifecycle {
+    ignore_changes = [
+      client,
+      client_version,
+      template[0].containers[0].image,
+    ]
+  }
 }
 
 resource "google_compute_region_network_endpoint_group" "status_app" {

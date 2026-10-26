@@ -53,13 +53,13 @@ variable "scheduler_timezone" {
 
 variable "image_mock" {
   type        = string
-  description = "Override mock Venafi image URI (defaults to Artifact Registry)"
+  description = "Optional mock Venafi image URI override"
   default     = ""
 }
 
 variable "image_sync" {
   type        = string
-  description = "Override cert-sync image URI (defaults to Artifact Registry)"
+  description = "Optional cert-sync image URI override"
   default     = ""
 }
 

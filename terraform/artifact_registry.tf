@@ -7,7 +7,8 @@ resource "google_artifact_registry_repository" "repo" {
 }
 
 locals {
-  repo_path  = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.repo.repository_id}"
-  image_mock = coalesce(var.image_mock, "${local.repo_path}/mock-venafi:latest")
-  image_sync = coalesce(var.image_sync, "${local.repo_path}/cert-sync:latest")
+  placeholder_image = "us-docker.pkg.dev/cloudrun/container/hello"
+  repo_path         = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.repo.repository_id}"
+  image_sync        = trimspace(var.image_sync) != "" ? var.image_sync : local.placeholder_image
+  image_mock        = trimspace(var.image_mock) != "" ? var.image_mock : local.placeholder_image
 }

@@ -28,7 +28,6 @@ SCHEDULER_TIMEZONE="${SCHEDULER_TIMEZONE:-}"
 
 echo ""
 echo "Deploy Venafi certificate automation"
-echo "  Scans Secret Manager for *-certificate / *-private-key pairs near expiry"
 echo "  Env and terraform.tfvars values are reused; only missing values are prompted"
 echo ""
 
@@ -38,7 +37,7 @@ resolve_str PREFIX "Resource name prefix" "venafi-cert" "name_prefix" "${TFVARS}
 
 if [[ -z "${USE_MOCK}" ]] && tfvar_has "${TFVARS}" "enable_mock"; then
   USE_MOCK="$(tfvar_get "${TFVARS}" "enable_mock")"
-  echo "  USE_MOCK: using terraform.tfvars (enable_mock=${USE_MOCK})" >&2
+  echo "  USE_MOCK=${USE_MOCK} (from terraform.tfvars)" >&2
 fi
 resolve_bool USE_MOCK "Use mock Venafi?" "false"
 
@@ -80,9 +79,16 @@ if [[ "${NONINTERACTIVE}" != "true" ]]; then
 fi
 
 if [[ -z "${PROJECT_ID}" ]]; then
-  echo "GCP project ID is required (set project_id in terraform.tfvars, PROJECT_ID=…, or answer the prompt)" >&2
+  echo "GCP project ID is required (set project_id in terraform.tfvars, PROJECT_ID=..., or answer the prompt)" >&2
   exit 1
 fi
+
+for cmd in gcloud terraform python3; do
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    echo "Required command not found: ${cmd}" >&2
+    exit 1
+  fi
+done
 
 seed_mock="false"
 [[ "${USE_MOCK}" == "true" ]] && seed_mock="true"
@@ -98,13 +104,17 @@ fi
 gcloud config set project "${PROJECT_ID}" >/dev/null
 
 echo ""
-echo "Working..."
+echo "Working in project=${PROJECT_ID} region=${REGION} prefix=${PREFIX}..."
 
+echo "Enabling required APIs..."
 gcloud services enable \
   run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com \
-  secretmanager.googleapis.com cloudscheduler.googleapis.com pubsub.googleapis.com \
+  secretmanager.googleapis.com cloudscheduler.googleapis.com \
   iam.googleapis.com logging.googleapis.com monitoring.googleapis.com \
-  --project="${PROJECT_ID}" >/dev/null
+  --project="${PROJECT_ID}"
+if [[ "${ENABLE_PUBSUB_EVENTS}" == "true" ]]; then
+  gcloud services enable pubsub.googleapis.com --project="${PROJECT_ID}"
+fi
 
 rm -f terraform/certificates.auto.tfvars.json
 
@@ -126,12 +136,20 @@ alert_emails              = ${ALERT_EMAILS_HCL}
 notification_channel_ids  = ${CHANNEL_IDS_HCL}
 EOF
 
+tf_select_workspace() {
+  local ws="$1"
+  terraform workspace select "${ws}" >/dev/null 2>&1 \
+    || terraform workspace new "${ws}" >/dev/null
+}
+
 cd terraform
+echo "Terraform apply..."
 terraform init -input=false >/dev/null
-terraform apply -input=false -auto-approve \
-  -target=google_project_service.apis \
-  -target=google_artifact_registry_repository.repo >/dev/null
+tf_select_workspace "${PROJECT_ID}"
+terraform apply -input=false -auto-approve
 REPO_PATH="$(terraform output -raw repo_path)"
+JOB_NAME="$(terraform output -raw cert_sync_job)"
+NOTIFY_TOPIC="$(terraform output -raw notify_topic 2>/dev/null || true)"
 cd "$ROOT"
 
 need_images=false
@@ -141,22 +159,30 @@ if [[ "${USE_MOCK}" == "true" ]]; then
 fi
 
 if [[ "${FORCE_IMAGE_BUILD}" == "true" || "${need_images}" == "true" ]]; then
-  echo "Building images..."
+  echo "Building images into ${REPO_PATH}..."
   TAG="$(date +%Y%m%d%H%M%S)"
-  gcloud builds submit --project="${PROJECT_ID}" --config=cloudbuild/build-images.yaml \
+  if [[ "${USE_MOCK}" == "true" ]]; then
+    BUILD_CONFIG=cloudbuild/build-images.yaml
+  else
+    BUILD_CONFIG=cloudbuild/build-images-sync-only.yaml
+  fi
+  gcloud builds submit --project="${PROJECT_ID}" --config="${BUILD_CONFIG}" \
     --substitutions=_REGION="${REGION}",_REPO="${PREFIX}",_TAG="${TAG}" .
 else
   echo "Images already exist, skipping build (set FORCE_IMAGE_BUILD=true to rebuild)"
 fi
 
-echo "Creating automation..."
-cd terraform
-terraform apply -input=false -auto-approve
-JOB_NAME="$(terraform output -raw cert_sync_job)"
-NOTIFY_TOPIC="$(terraform output -raw notify_topic 2>/dev/null || true)"
-echo "Discovery settings:"
-terraform output -json discovery | python3 -m json.tool
-cd "$ROOT"
+echo "Updating Cloud Run images..."
+if [[ "${USE_MOCK}" == "true" ]]; then
+  gcloud run services update "${PREFIX}-mock" \
+    --project="${PROJECT_ID}" \
+    --region="${REGION}" \
+    --image="${REPO_PATH}/mock-venafi:latest"
+fi
+gcloud run jobs update "${JOB_NAME}" \
+  --project="${PROJECT_ID}" \
+  --region="${REGION}" \
+  --image="${REPO_PATH}/cert-sync:latest"
 
 if [[ "${USE_MOCK}" != "true" ]]; then
   if ! gcloud secrets versions access latest --secret="${PREFIX}-venafi-password" --project="${PROJECT_ID}" >/dev/null 2>&1; then
@@ -165,13 +191,21 @@ if [[ "${USE_MOCK}" != "true" ]]; then
   fi
 fi
 
+cd terraform
+tf_select_workspace "${PROJECT_ID}"
+echo "Discovery settings:"
+terraform output -json discovery | python3 -m json.tool
+cd "$ROOT"
+
 echo ""
 echo "Ready."
 echo "  Project:     ${PROJECT_ID}"
 echo "  Region:      ${REGION}"
 echo "  Prefix:      ${PREFIX}"
 echo "  Sync job:    ${JOB_NAME}"
+echo "  Sync image:  ${REPO_PATH}/cert-sync:latest"
 echo "  Schedule:    ${SCHEDULER_CRON} (${SCHEDULER_TIMEZONE})"
+echo "  Registry:    ${REPO_PATH}"
 echo "  Behavior:    scans project Secret Manager for *-certificate pairs near expiry"
 [[ -n "${NOTIFY_TOPIC}" && "${NOTIFY_TOPIC}" != "null" ]] && echo "  Events topic:${NOTIFY_TOPIC}"
 echo ""

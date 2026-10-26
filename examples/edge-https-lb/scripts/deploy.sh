@@ -47,6 +47,8 @@ SECRET_CERT="${CERT_NAME}-certificate"
 SECRET_KEY="${CERT_NAME}-private-key"
 TF_BUCKET="${PROJECT_ID}-${APP_PREFIX}-tf"
 REPO_PATH="${REGION}-docker.pkg.dev/${PROJECT_ID}/${APP_PREFIX}"
+STATUS_IMAGE="${REPO_PATH}/edge-status-app:latest"
+APP_SERVICE="${APP_PREFIX}-app"
 
 gcloud config set project "${PROJECT_ID}" >/dev/null
 
@@ -77,25 +79,27 @@ else
   fi
 fi
 
-STATUS_IMAGE="${REPO_PATH}/edge-status-app:latest"
 cat > "${TFVARS}" <<EOF
 project_id         = "${PROJECT_ID}"
 region             = "${REGION}"
 name_prefix        = "${APP_PREFIX}"
 secret_cert_name   = "${SECRET_CERT}"
 secret_key_name    = "${SECRET_KEY}"
-status_app_image   = "${STATUS_IMAGE}"
 tf_state_bucket    = "${TF_BUCKET}"
 EOF
 
-echo "Applying example stack (AR, trigger, HTTPS LB)..."
+echo "Uploading Terraform package for Cloud Build trigger..."
+PROJECT_ID="${PROJECT_ID}" TF_BUCKET="${TF_BUCKET}" \
+  scripts/internal/upload-tf-source.sh
+
+echo "Terraform apply..."
 cd terraform
 terraform init -input=false -reconfigure \
   -backend-config="bucket=${TF_BUCKET}" \
   -backend-config="prefix=edge-https-lb" >/dev/null
-terraform apply -input=false -auto-approve \
-  -target=google_project_service.apis \
-  -target=google_artifact_registry_repository.app >/dev/null
+terraform apply -input=false -auto-approve
+LB_IP="$(terraform output -raw lb_ip)"
+TRIGGER="$(terraform output -raw trigger_name)"
 cd "${EXAMPLE_ROOT}"
 
 need_image=false
@@ -107,16 +111,11 @@ if [[ "${FORCE_IMAGE_BUILD}" == "true" || "${need_image}" == "true" ]]; then
     --substitutions=_REGION="${REGION}",_REPO="${APP_PREFIX}",_TAG="${TAG}" .
 fi
 
-echo "Uploading Terraform package for Cloud Build trigger..."
-PROJECT_ID="${PROJECT_ID}" TF_BUCKET="${TF_BUCKET}" \
-  scripts/internal/upload-tf-source.sh
-
-echo "Applying full example stack..."
-cd terraform
-terraform apply -input=false -auto-approve
-LB_IP="$(terraform output -raw lb_ip)"
-TRIGGER="$(terraform output -raw trigger_name)"
-cd "${EXAMPLE_ROOT}"
+echo "Updating Cloud Run images..."
+gcloud run services update "${APP_SERVICE}" \
+  --project="${PROJECT_ID}" \
+  --region="${REGION}" \
+  --image="${STATUS_IMAGE}"
 
 echo ""
 echo "Example stack ready."

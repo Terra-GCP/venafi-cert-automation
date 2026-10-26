@@ -27,7 +27,8 @@ variable "secret_key_name" {
 
 variable "status_app_image" {
   type        = string
-  description = "Container image for the example HTTPS status application"
+  description = "Optional status app image URI override"
+  default     = ""
 }
 
 variable "tf_state_bucket" {

@@ -13,6 +13,7 @@ out/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+terraform.tfstate.d/
 *.tfvars
 *.auto.tfvars.json
 !**/terraform.tfvars.example
